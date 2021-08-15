@@ -271,8 +271,6 @@ Resources:
           sudo aws s3 cp s3://udagram-mina/udagram.zip ./
           unzip udagram.zip        
       ImageId: ami-0b1deee75235aa4bb
-      #to be removed .. for testing
-      KeyName: udacity-frankfurt-v2
       SecurityGroups:
       - Ref: WebServerSecGroup
       InstanceType: t3.small
