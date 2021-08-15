@@ -19,10 +19,15 @@ Parameters:
     Type: String
     Default: 10.0.2.0/24
 
-  PublicSubnetCIDR:
+  PublicSubnet1CIDR:
     Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
     Type: String
     Default: 10.0.3.0/24
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.4.0/24
+
 Resources:
   VPC: 
       Type: AWS::EC2::VPC
@@ -69,16 +74,114 @@ Resources:
                 Value: !Sub ${EnvironmentName} Private Subnet 2 (AZ1)
 
 
-  PublicSubnet: 
+  PublicSubnet1: 
       Type: AWS::EC2::Subnet
       Properties:
           VpcId: !Ref VPC
           AvailabilityZone: !Select [ 0, !GetAZs '' ]
-          CidrBlock: !Ref PublicSubnetCIDR
+          CidrBlock: !Ref PublicSubnet1CIDR
           MapPublicIpOnLaunch: false
           Tags: 
               - Key: Name 
-                Value: !Sub ${EnvironmentName} Public Subnet
+                Value: !Sub ${EnvironmentName} Public Subnet 1
+  PublicSubnet2: 
+    Type: AWS::EC2::Subnet
+    Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select [ 1, !GetAZs '' ]
+        CidrBlock: !Ref PublicSubnet2CIDR
+        MapPublicIpOnLaunch: false
+        Tags: 
+            - Key: Name 
+              Value: !Sub ${EnvironmentName} Public Subnet 2
+  PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties: 
+          VpcId: !Ref VPC
+          Tags: 
+              - Key: Name 
+                Value: !Sub ${EnvironmentName} Public Routes
+  PublicSubnetRouteTableAssociation1:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+          RouteTableId: !Ref PublicRouteTable
+          SubnetId: !Ref PublicSubnet1
+  PublicSubnetRouteTableAssociation2:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+          RouteTableId: !Ref PublicRouteTable
+          SubnetId: !Ref PublicSubnet2
+  DefaultPublicRoute:
+      Type: AWS::EC2::Route
+      Properties:
+          RouteTableId: !Ref PublicRouteTable
+          DestinationCidrBlock: 0.0.0.0/0
+          GatewayId: !Ref InternetGateway
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties: 
+        Domain: VPC
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+        Domain: VPC
+
+  NatGateway1: 
+      Type: AWS::EC2::NatGateway
+      Properties: 
+          AllocationId: !GetAtt NatGateway1EIP.AllocationId
+          SubnetId: !Ref PublicSubnet1
+
+  NatGateway2: 
+      Type: AWS::EC2::NatGateway
+      Properties:
+          AllocationId: !GetAtt NatGateway2EIP.AllocationId
+          SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+      Type: AWS::EC2::RouteTable
+      Properties: 
+          VpcId: !Ref VPC
+          Tags: 
+              - Key: Name 
+                Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+  DefaultPrivateRoute1:
+      Type: AWS::EC2::Route
+      Properties:
+          RouteTableId: !Ref PrivateRouteTable1
+          DestinationCidrBlock: 0.0.0.0/0
+          NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+          RouteTableId: !Ref PrivateRouteTable1
+          SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+      Type: AWS::EC2::RouteTable
+      Properties: 
+          VpcId: !Ref VPC
+          Tags: 
+              - Key: Name 
+                Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+
+  DefaultPrivateRoute2:
+      Type: AWS::EC2::Route
+      Properties:
+          RouteTableId: !Ref PrivateRouteTable2
+          DestinationCidrBlock: 0.0.0.0/0
+          NatGatewayId: !Ref NatGateway2
+
+  PrivateSubnet2RouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+          RouteTableId: !Ref PrivateRouteTable2
+          SubnetId: !Ref PrivateSubnet2
 
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
@@ -146,8 +249,8 @@ Resources:
             Action:
               - s3:*
             Resource:
-              - arn:aws:s3:::udacity-de/*
-              - arn:aws:s3:::udacity-de
+              - arn:aws:s3:::udagram-mina/*
+              - arn:aws:s3:::udagram-mina
       Roles:
         -
           !Ref EC2InstanceRole
@@ -164,9 +267,12 @@ Resources:
           apt-get install apache2 -y
           systemctl start apache2.service
           cd /var/www/html
-          aws s3 cp s3://udagram-mina
-          unzip udagrap.zip        
+          sudo rm -f index.html
+          sudo aws s3 cp s3://udagram-mina/udagram.zip ./
+          unzip udagram.zip        
       ImageId: ami-0b1deee75235aa4bb
+      #to be removed .. for testing
+      KeyName: udacity-frankfurt-v2
       SecurityGroups:
       - Ref: WebServerSecGroup
       InstanceType: t3.small
@@ -192,8 +298,8 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Subnets:
-        - Ref: PrivateSubnet1
-        - Ref: PrivateSubnet2
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
       SecurityGroups:
       - Ref: LBSecGroup
   Listener:
@@ -231,3 +337,8 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 5
       VpcId: !Ref VPC
+Outputs:
+  URL:
+    Description: Load balancer public
+    Value:
+      Fn::Join: ["", ["http://", !GetAtt WebAppLB.DNSName]]
